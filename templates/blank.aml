@@ -1,0 +1,13 @@
+program BlankProgram {
+  state {
+    owner: address
+  }
+
+  constructor() {
+    self.owner = caller
+  }
+
+  view fn owner_of(): address {
+    return self.owner
+  }
+}
