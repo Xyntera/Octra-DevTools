@@ -8,5 +8,8 @@ void main() {
     expect(find.text('Octra DevTools'), findsWidgets);
     expect(find.text('Compile AML'), findsOneWidget);
     expect(find.text('main.aml'), findsWidgets);
+    expect(find.text('OCS01 Token'), findsWidgets);
+    expect(find.text('Multisig'), findsWidgets);
+    expect(find.text('AMM'), findsWidgets);
   });
 }

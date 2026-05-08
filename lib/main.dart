@@ -21,27 +21,10 @@ void main() {
 const _defaultRpcUrl = 'https://octra.network/rpc';
 const _octScale = 1000000;
 
-const _starterAml = '''program MobileCounter {
-  state {
-    owner: address
-    count: int
-  }
-
-  event Incremented(by: address, value: int)
-
+const _starterAml = '''contract MyContract {
+  state { owner: address }
   constructor() {
     self.owner = caller
-    self.count = 0
-  }
-
-  view fn get_count(): int {
-    return self.count
-  }
-
-  fn increment(): bool {
-    self.count = self.count + 1
-    emit Incremented(caller, self.count)
-    return true
   }
 }
 ''';
@@ -324,20 +307,18 @@ class _DevToolsHomeState extends State<DevToolsHome> {
 
   Future<void> _newTemplate(String template) async {
     await _run('new template', () async {
-      final source = switch (template) {
-        'token' => _tokenTemplate,
-        'vault' => _vaultTemplate,
-        'escrow' => _escrowTemplate,
-        _ => _starterAml,
-      };
+      final files = _templateFiles(template);
       _files
         ..clear()
-        ..add(DevProjectFile(path: 'main.aml', source: source));
+        ..addAll(files);
       _selectedPath = 'main.aml';
-      _amlSource.text = source;
+      _amlSource.text = files.first.source;
       _syncProjectJson();
       await _persistProject();
-      return {'template': template, 'file': 'main.aml'};
+      return {
+        'template': template,
+        'files': files.map((file) => file.path).toList(),
+      };
     });
   }
 
@@ -403,7 +384,9 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     final result = await _rpc.call(
       url: _rpcUrl.text,
       method: 'octra_compileAmlMulti',
-      params: [files, 'main.aml'],
+      params: [
+        {'files': files, 'main': 'main.aml'},
+      ],
     );
     _captureCompileOutput(result);
     return result;
@@ -962,7 +945,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
             ),
             OutlinedButton(
               onPressed: _busy ? null : () => _newTemplate('token'),
-              child: const Text('Token'),
+              child: const Text('OCS01 Token'),
             ),
             OutlinedButton(
               onPressed: _busy ? null : () => _newTemplate('vault'),
@@ -971,6 +954,14 @@ class _DevToolsHomeState extends State<DevToolsHome> {
             OutlinedButton(
               onPressed: _busy ? null : () => _newTemplate('escrow'),
               child: const Text('Escrow'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : () => _newTemplate('multisig'),
+              child: const Text('Multisig'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : () => _newTemplate('amm'),
+              child: const Text('AMM'),
             ),
           ],
         ),
@@ -1275,7 +1266,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
             ),
             OutlinedButton(
               onPressed: _busy ? null : () => _newTemplate('token'),
-              child: const Text('Token'),
+              child: const Text('OCS01 Token'),
             ),
             OutlinedButton(
               onPressed: _busy ? null : () => _newTemplate('vault'),
@@ -1284,6 +1275,14 @@ class _DevToolsHomeState extends State<DevToolsHome> {
             OutlinedButton(
               onPressed: _busy ? null : () => _newTemplate('escrow'),
               child: const Text('Escrow'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : () => _newTemplate('multisig'),
+              child: const Text('Multisig'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : () => _newTemplate('amm'),
+              child: const Text('AMM'),
             ),
           ],
         ),
@@ -1679,7 +1678,7 @@ class _SyntaxPreview extends StatelessWidget {
 
 List<TextSpan> _highlightAml(String source) {
   final keywords = RegExp(
-    r'\b(program|contract|state|constructor|fn|view|let|if|else|while|for|in|return|assert|require|struct|enum|event|import|interface|true|false|self|caller|origin|emit)\b',
+    r'\b(program|contract|state|constructor|fn|view|let|if|else|while|for|in|return|assert|require|struct|enum|event|import|interface|implements|const|payable|nonreentrant|true|false|self|caller|origin|emit|transfer|value)\b',
   );
   final types = RegExp(
     r'\b(string|int|bool|address|bytes|cipher|pubkey|map|list|void)\b',
@@ -1720,67 +1719,318 @@ List<TextSpan> _highlightAml(String source) {
   return spans;
 }
 
-const _tokenTemplate = '''program MobileToken {
+List<DevProjectFile> _templateFiles(String template) {
+  return switch (template) {
+    'token' => const [
+      DevProjectFile(path: 'main.aml', source: _tokenTemplate),
+      DevProjectFile(path: 'interfaces/IOCS01.aml', source: _iocs01Template),
+    ],
+    'vault' => const [DevProjectFile(path: 'main.aml', source: _vaultTemplate)],
+    'escrow' => const [
+      DevProjectFile(path: 'main.aml', source: _escrowTemplate),
+    ],
+    'multisig' => const [
+      DevProjectFile(path: 'main.aml', source: _multisigTemplate),
+    ],
+    'amm' => const [DevProjectFile(path: 'main.aml', source: _ammTemplate)],
+    _ => const [DevProjectFile(path: 'main.aml', source: _starterAml)],
+  };
+}
+
+const _tokenTemplate = '''import IOCS01 from "interfaces/IOCS01.aml"
+
+contract Token implements IOCS01 {
   state {
     name: string
     symbol: string
     total_supply: int
-    balances: map<address, int>
+    decimals: int
+    owner: address
+    balances: map[address]int
+    grants: map[address]map[address]int
   }
 
-  constructor(n: string, s: string, supply: int) {
+  event Transfer(from: address, to: address, amount: int)
+  event Grant(owner: address, spender: address, amount: int)
+
+  constructor(n: string, s: string, supply: int, dec: int) {
+    require(len(n) > 0, "name empty")
     self.name = n
     self.symbol = s
     self.total_supply = supply
-    self.balances[caller] = supply
+    self.decimals = dec
+    self.owner = origin
+    self.balances[origin] = supply
+    emit Transfer(origin, origin, supply)
   }
 
-  view fn balance_of(owner: address): int {
-    return self.balances[owner]
-  }
-}
-''';
+  view fn decimals(): int { return self.decimals }
+  view fn balance_of(addr: address): int { return self.balances[addr] }
 
-const _vaultTemplate = '''program Vault {
-  state {
-    owner: address
-    deposits: map<address, int>
+  view fn allowance(owner: address, spender: address): int {
+    return self.grants[owner][spender]
   }
 
-  constructor() {
-    self.owner = caller
-  }
+  view fn get_name(): string { return self.name }
+  view fn get_symbol(): string { return self.symbol }
+  view fn get_total_supply(): int { return self.total_supply }
 
-  fn deposit(amount: int): bool {
-    self.deposits[caller] = self.deposits[caller] + amount
+  fn transfer(to: address, amt: int): bool {
+    assert_address(to)
+    let bal = self.balances[caller]
+    require(bal >= amt, "insufficient balance")
+    self.balances[caller] = bal - amt
+    self.balances[to] = self.balances[to] + amt
+    emit Transfer(caller, to, amt)
     return true
   }
 
-  view fn balance_of(owner: address): int {
-    return self.deposits[owner]
+  fn grant(spender: address, amt: int): bool {
+    assert_address(spender)
+    self.grants[caller][spender] = amt
+    emit Grant(caller, spender, amt)
+    return true
+  }
+
+  fn pull(from: address, to: address, amt: int): bool {
+    assert_address(to)
+    let allowed = self.grants[from][caller]
+    require(allowed >= amt, "not allowed")
+    let bal = self.balances[from]
+    require(bal >= amt, "insufficient balance")
+    self.balances[from] = bal - amt
+    self.balances[to] = self.balances[to] + amt
+    self.grants[from][caller] = allowed - amt
+    emit Transfer(from, to, amt)
+    return true
   }
 }
 ''';
 
-const _escrowTemplate = '''program Escrow {
+const _iocs01Template = '''interface IOCS01 {
+  fn transfer(to: address, amount: int): bool
+  fn grant(spender: address, amount: int): bool
+  fn pull(from: address, to: address, amount: int): bool
+  fn balance_of(addr: address): int
+  fn allowance(owner: address, spender: address): int
+  fn get_name(): string
+  fn get_symbol(): string
+  fn get_total_supply(): int
+}
+''';
+
+const _vaultTemplate = '''contract Vault {
+  state {
+    owner: address
+    deposits: map[address]int
+    total: int
+  }
+
+  event Deposit(who: address, amount: int)
+  event Withdraw(who: address, amount: int)
+
+  constructor() {
+    self.owner = origin
+    self.total = 0
+  }
+
+  payable fn deposit(): int {
+    require(value > 0, "must send OCT")
+    self.deposits[caller] += value
+    self.total += value
+    emit Deposit(caller, value)
+    return self.deposits[caller]
+  }
+
+  nonreentrant fn withdraw(amt: int): bool {
+    let bal = self.deposits[caller]
+    require(bal >= amt, "insufficient deposit")
+    self.deposits[caller] = bal - amt
+    self.total -= amt
+    transfer(caller, amt)
+    emit Withdraw(caller, amt)
+    return true
+  }
+
+  view fn balance_of(addr: address): int {
+    return self.deposits[addr]
+  }
+
+  view fn total_locked(): int {
+    return self.total
+  }
+}
+''';
+
+const _escrowTemplate = '''contract Escrow {
   state {
     seller: address
     buyer: address
     arbiter: address
+    amount: int
+    funded: bool
     released: bool
   }
 
+  event Created(seller: address, buyer: address, arbiter: address)
+  event Funded(amount: int)
+  event Released(to: address, amount: int)
+  event Refunded(to: address, amount: int)
+
   constructor(s: address, b: address, a: address) {
+    assert_address(s)
+    assert_address(b)
+    assert_address(a)
     self.seller = s
     self.buyer = b
     self.arbiter = a
+    self.amount = 0
+    self.funded = false
     self.released = false
+    emit Created(s, b, a)
+  }
+
+  payable fn fund(): bool {
+    require(caller == self.buyer, "only buyer")
+    require(!self.funded, "already funded")
+    require(value > 0, "must send OCT")
+    self.amount = value
+    self.funded = true
+    emit Funded(value)
+    return true
   }
 
   fn release(): bool {
-    require(caller == self.buyer || caller == self.arbiter)
+    require(caller == self.buyer || caller == self.arbiter, "not authorized")
+    require(self.funded && !self.released, "invalid state")
     self.released = true
+    transfer(self.seller, self.amount)
+    emit Released(self.seller, self.amount)
     return true
+  }
+
+  fn refund(): bool {
+    require(caller == self.seller || caller == self.arbiter, "not authorized")
+    require(self.funded && !self.released, "invalid state")
+    self.released = true
+    transfer(self.buyer, self.amount)
+    emit Refunded(self.buyer, self.amount)
+    return true
+  }
+
+  view fn status(): string {
+    return !self.funded ? "awaiting_funding" : self.released ? "completed" : "funded"
+  }
+}
+''';
+
+const _multisigTemplate = '''contract Multisig {
+  const MAX_OWNERS: int = 5
+  state {
+    owners: list[address]
+    threshold: int
+    next_id: int
+    proposals: map[int]string
+    prop_amounts: map[int]int
+    prop_targets: map[int]address
+    votes: map[int]map[address]bool
+    vote_counts: map[int]int
+    executed: map[int]bool
+  }
+
+  event Proposed(id: int, target: address, amount: int)
+  event Voted(id: int, voter: address)
+  event Executed(id: int)
+
+  constructor(threshold_val: int) {
+    require(threshold_val > 0, "threshold must be > 0")
+    self.threshold = threshold_val
+    self.next_id = 0
+    self.owners.push(origin)
+  }
+
+  fn propose(target: address, amount: int, desc: string): int {
+    assert_address(target)
+    let id = self.next_id
+    self.proposals[id] = desc
+    self.prop_amounts[id] = amount
+    self.prop_targets[id] = target
+    self.vote_counts[id] = 0
+    self.executed[id] = false
+    self.next_id = id + 1
+    emit Proposed(id, target, amount)
+    return id
+  }
+
+  fn vote(id: int): bool {
+    require(!self.executed[id], "already executed")
+    require(!self.votes[id][caller], "already voted")
+    self.votes[id][caller] = true
+    self.vote_counts[id] += 1
+    emit Voted(id, caller)
+    if self.vote_counts[id] >= self.threshold {
+      self.executed[id] = true
+      transfer(self.prop_targets[id], self.prop_amounts[id])
+      emit Executed(id)
+    }
+    return true
+  }
+
+  view fn get_proposal(id: int): string {
+    return self.proposals[id]
+  }
+}
+''';
+
+const _ammTemplate = '''contract SimpleAMM {
+  state {
+    token_a: address
+    token_b: address
+    reserve_a: int
+    reserve_b: int
+    total_lp: int
+    lp_balances: map[address]int
+  }
+
+  event Swap(who: address, token_in: address, amount_in: int, amount_out: int)
+  event AddLiquidity(who: address, a: int, b: int, lp: int)
+
+  constructor(a: address, b: address) {
+    self.token_a = a
+    self.token_b = b
+    self.reserve_a = 0
+    self.reserve_b = 0
+    self.total_lp = 0
+  }
+
+  fn add_liquidity(amount_a: int, amount_b: int): int {
+    require(amount_a > 0 && amount_b > 0, "amounts must be positive")
+    let lp = amount_a * amount_b
+    self.reserve_a += amount_a
+    self.reserve_b += amount_b
+    self.total_lp += lp
+    self.lp_balances[caller] += lp
+    emit AddLiquidity(caller, amount_a, amount_b, lp)
+    return lp
+  }
+
+  fn swap_a_for_b(amount_in: int): int {
+    require(amount_in > 0, "zero input")
+    let out = (amount_in * self.reserve_b) / (self.reserve_a + amount_in)
+    require(out > 0, "output too small")
+    self.reserve_a += amount_in
+    self.reserve_b -= out
+    emit Swap(caller, self.token_a, amount_in, out)
+    return out
+  }
+
+  view fn get_reserves(): (int, int) {
+    return (self.reserve_a, self.reserve_b)
+  }
+
+  view fn get_price(): int {
+    require(self.reserve_a > 0, "no liquidity")
+    return (self.reserve_b * 1000000) / self.reserve_a
   }
 }
 ''';

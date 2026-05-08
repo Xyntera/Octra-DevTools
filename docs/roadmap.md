@@ -21,11 +21,12 @@ Goal: replicate the core Octra client DevTools loop.
 - Done: multi-file AML compile through JSON project input.
 - Done: OASM compile.
 - Done: output inspector for compiler/RPC data.
-- Done: project templates: blank, token, vault, escrow.
+- Done: webcli-matched templates: empty, OCS01 token, vault, escrow, multisig, AMM.
 - Done: local project persistence.
 - Done: file import for AML/OASM/JSON/TXT files.
 - Done: syntax-highlighted AML preview.
-- Open: OCS-01 token, multisig, PrivateML example-inspired templates.
+- Done: all webcli templates live-RPC compile-tested with bytecode and ABI output.
+- Open: PrivateML example-inspired templates.
 - Open: folder-tree import/presentation.
 - Open: copy/export compiler output.
 

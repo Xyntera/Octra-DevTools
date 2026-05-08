@@ -50,7 +50,7 @@ Implemented:
 - Watch-only mode.
 - File import for AML/OASM/JSON/TXT project files.
 - Mobile project file tabs and local project persistence.
-- Built-in templates: blank, token, vault, escrow.
+- Built-in webcli-matched templates: empty, OCS01 token, vault, escrow, multisig, AMM.
 - AML compile.
 - Multi-file AML compile.
 - OASM compile.
@@ -98,6 +98,22 @@ The host smoke test validates register, encrypt, decrypt, view-key derivation, a
 native/cpp/build_host.sh
 python3 native/cpp/smoke_test.py native/cpp/target/local/liboctra_core.so
 ```
+
+## Template Coverage
+
+The bundled templates mirror `webcli/static/templates`:
+
+- `empty/main.aml`
+- `token/main.aml`
+- `token/interfaces/IOCS01.aml`
+- `vault/main.aml`
+- `escrow/main.aml`
+- `multisig/main.aml`
+- `amm/main.aml`
+
+All six templates were tested against live Octra RPC using `octra_compileAmlMulti`.
+Each returned bytecode and ABI with compiler version `1.0 Rehovot`. Dry deploy
+address preview was also tested with `octra_computeContractAddress`.
 
 ## Release Signing
 
