@@ -8,9 +8,21 @@ This repo is intentionally separate from Octra Wallet. The goal is a mobile-firs
 
 - Flutter Android/iOS project scaffolded.
 - Professional Octra DevTools shell UI added.
+- Wallet import/login using seed phrase, 32-byte private key, or watch-only Octra address.
 - Single-file AppliedML editor added.
-- `octra_compileAml` JSON-RPC compiler call wired through Dart `HttpClient`.
-- Output inspector layout added for ABI, assembly, compiler output, storage, and errors.
+- Multi-file project JSON compile surface added.
+- Octra Assembly compile surface added.
+- `octra_compileAml`, `octra_compileAmlMulti`, and `octra_compileAssembly` JSON-RPC calls wired.
+- Dynamic fee fetcher wired through `octra_recommendedFee`.
+- Deploy preview wired through `octra_computeContractAddress`.
+- Program deploy transaction signing wired locally with Ed25519.
+- Contract read-only call wired through `contract_call`.
+- State-changing contract-call transaction signing wired locally with Ed25519.
+- Contract metadata, ABI, and storage lookup wired.
+- Source verification wired through `contract_verify`.
+- Groth16 BN254 proof bundle encoder and verifier-call screen added.
+- FHE tool product surface added with explicit native PVAC FFI requirement.
+- Output inspector added for RPC results and signed payload debugging.
 - Research docs added for official Octra IDE behavior, RPC methods, contract examples, and Groth16 BN254.
 
 ## Architecture Direction
@@ -24,6 +36,33 @@ Core layers:
 - `Octra RPC layer`: JSON-RPC 2.0 calls to `/rpc`.
 - `Wallet/signing layer`: reuse Octra Wallet key derivation/signing patterns for deploy and contract-call transactions.
 - `Native helpers`: optional Rust/FFI for heavy proof/FHE utilities if Dart implementation is not enough.
+
+## Feature Coverage
+
+Implemented:
+
+- Wallet login/import.
+- Watch-only mode.
+- AML compile.
+- Multi-file AML compile.
+- OASM compile.
+- Recommended fees.
+- Deploy address preview.
+- Signed deploy transaction build and submit.
+- Read-only contract call.
+- Signed contract-call transaction build and submit.
+- Contract info, ABI, and storage lookup.
+- Source verification.
+- Groth16 BN254 snarkjs JSON encoding and verifier call.
+
+Still requires native/product hardening:
+
+- Secure persistent key storage.
+- Biometric confirmation.
+- Native PVAC FHE encrypt/decrypt through Flutter FFI.
+- File/folder picker project manager.
+- ABI-driven forms and syntax highlighting.
+- Release signing configuration.
 
 ## Run
 

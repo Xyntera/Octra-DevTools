@@ -2,7 +2,7 @@
 
 ## Phase 0: Repo Baseline
 
-Status: started
+Status: complete
 
 - Flutter Android/iOS scaffold.
 - Octra DevTools visual shell.
@@ -13,52 +13,62 @@ Status: started
 
 ## Phase 1: Usable Mobile IDE
 
+Status: partially implemented
+
 Goal: replicate the core Octra client DevTools loop.
 
-- Project templates: blank, OCS-01 token, vault, escrow, multisig, PrivateML example-inspired template.
-- Local project manager.
-- File import and folder import.
-- AML/OASM editor with syntax highlighting.
-- Single-file AML compile.
-- Multi-file AML compile.
-- OASM compile.
-- Output tabs: ABI, bytecode, disassembly, console, storage, diagnostics.
-- Copy/export compiler output.
+- Done: single-file AML compile.
+- Done: multi-file AML compile through JSON project input.
+- Done: OASM compile.
+- Done: output inspector for compiler/RPC data.
+- Open: project templates: blank, OCS-01 token, vault, escrow, multisig, PrivateML example-inspired template.
+- Open: local project manager.
+- Open: file import and folder import.
+- Open: syntax highlighting.
+- Open: copy/export compiler output.
 
 ## Phase 2: Contract Interaction
 
+Status: partially implemented
+
 Goal: compile, deploy, call, inspect.
 
-- Compute/preview contract address.
-- Dynamic fee fetcher using `octra_recommendedFee(op_type?)`.
-- Deploy form with constructor JSON params.
-- ABI-aware call form.
-- Read-only `contract_call`.
-- Signed state-changing contract-call transaction.
-- Receipt viewer through `contract_receipt`.
-- Contract metadata through `vm_contract`.
-- ABI fetch through `octra_contractAbi`.
-- Storage lookup through `octra_contractStorage`.
+- Done: compute/preview contract address.
+- Done: dynamic fee fetcher using `octra_recommendedFee(op_type?)`.
+- Done: deploy form with constructor JSON params.
+- Done: read-only `contract_call`.
+- Done: signed state-changing contract-call transaction.
+- Done: contract metadata through `vm_contract`.
+- Done: ABI fetch through `octra_contractAbi`.
+- Done: storage lookup through `octra_contractStorage`.
+- Open: ABI-aware call form.
+- Open: receipt viewer through `contract_receipt`.
 
 ## Phase 3: Wallet-Signed Native Flow
 
+Status: partially implemented
+
 Goal: no server, local signing only.
 
-- Import Octra wallet.
-- Watch-only address mode for read-only dev work.
-- Secure key storage.
-- Biometric/PIN confirmation before deploy/call.
-- Nonce lookup and pending transaction tracking.
-- Submit signed transaction with `octra_submit`.
+- Done: import Octra wallet using seed phrase or private key.
+- Done: watch-only address mode for read-only dev work.
+- Done: nonce lookup with staging fallback.
+- Done: submit signed transaction with `octra_submit`.
+- Open: secure key storage.
+- Open: biometric/PIN confirmation before deploy/call.
+- Open: full pending transaction tracker.
 
 ## Phase 4: Source Verification
 
+Status: partially implemented
+
 Goal: source-to-chain traceability.
 
-- Verify deployed source using current project files.
-- Save ABI after successful deployment.
-- Fetch verified source.
-- Compare local source hash with verified source where possible.
+- Done: verify deployed source using current main AML source.
+- Open: multi-file source verification from project manager.
+- Open: save ABI after successful deployment.
+- Open: fetch verified source.
+- Open: compare local source hash with verified source where possible.
 
 ## Phase 5: FHE and Private Program Tools
 
@@ -72,15 +82,18 @@ Goal: make encrypted program testing practical.
 
 ## Phase 6: Groth16 BN254 Proof Lab
 
+Status: partially implemented
+
 Goal: mobile proof-verifier tooling for Octra programs.
 
-- Import snarkjs `verification_key.json`, `proof.json`, `public.json`.
-- Validate BN254 curve/protocol and `nPublic`.
-- Encode `OG16V1` verification key bundle.
-- Encode `OG16P1` proof bundle.
-- Encode public inputs.
-- Call verifier contract method `verify` through `contract_call`.
-- Save recent verifier contracts and caller addresses.
+- Done: paste/import snarkjs `verification_key.json`, `proof.json`, `public.json`.
+- Done: validate BN254 curve/protocol and `nPublic`.
+- Done: encode `OG16V1` verification key bundle.
+- Done: encode `OG16P1` proof bundle.
+- Done: encode public inputs.
+- Done: call verifier contract method `verify` through `contract_call`.
+- Open: file picker import.
+- Open: save recent verifier contracts and caller addresses.
 
 ## Phase 7: Advanced Developer Experience
 
