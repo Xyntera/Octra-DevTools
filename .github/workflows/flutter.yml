@@ -97,12 +97,12 @@ jobs:
             exit 0
           fi
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
-          cat > android/key.properties <<'EOF'
-storePassword=${ANDROID_KEYSTORE_PASSWORD}
-keyPassword=${ANDROID_KEY_PASSWORD}
-keyAlias=${ANDROID_KEY_ALIAS}
-storeFile=app/release-keystore.jks
-EOF
+          {
+            echo "storePassword=${ANDROID_KEYSTORE_PASSWORD}"
+            echo "keyPassword=${ANDROID_KEY_PASSWORD}"
+            echo "keyAlias=${ANDROID_KEY_ALIAS}"
+            echo "storeFile=app/release-keystore.jks"
+          } > android/key.properties
 
       - name: Build release APK
         run: flutter build apk --release
