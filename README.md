@@ -21,7 +21,10 @@ This repo is intentionally separate from Octra Wallet. The goal is a mobile-firs
 - Contract metadata, ABI, and storage lookup wired.
 - Source verification wired through `contract_verify`.
 - Groth16 BN254 proof bundle encoder and verifier-call screen added.
-- FHE tool product surface added with explicit native PVAC FFI requirement.
+- Real PVAC/FHE host bridge added from the Octra Wallet native C++ core.
+- FHE key registration, encrypt, and decrypt are wired through Flutter FFI.
+- Heavy native PVAC calls run off the Flutter UI isolate to avoid app freezes.
+- Android CI builds and packages `liboctra_core.so`, `libcrypto.so`, and `libc++_shared.so`.
 - Output inspector added for RPC results and signed payload debugging.
 - Research docs added for official Octra IDE behavior, RPC methods, contract examples, and Groth16 BN254.
 
@@ -35,7 +38,7 @@ Core layers:
 - `Workspace layer`: local projects, imported files, templates, recent projects.
 - `Octra RPC layer`: JSON-RPC 2.0 calls to `/rpc`.
 - `Wallet/signing layer`: reuse Octra Wallet key derivation/signing patterns for deploy and contract-call transactions.
-- `Native helpers`: optional Rust/FFI for heavy proof/FHE utilities if Dart implementation is not enough.
+- `Native PVAC layer`: C++ FFI bridge over the vendored webcli PVAC implementation; no local server.
 
 ## Feature Coverage
 
@@ -62,13 +65,39 @@ Implemented:
 - Receipt lookup through contract receipt and raw transaction RPC calls.
 - Source verification.
 - Groth16 BN254 snarkjs JSON encoding and verifier call.
-- Native PVAC FFI bridge surface for FHE encrypt/decrypt.
+- Native PVAC health check.
+- Native PVAC public-key registration payload generation.
+- Native FHE encrypt/decrypt with `hfhe_v1|...` ciphertexts.
+- Native host FHE smoke test in CI.
+- Android native PVAC library build in CI.
 
 Still requires native/product hardening:
 
-- Bundling real `liboctra_core` binaries for Android/iOS PVAC operations.
-- Folder-tree project manager polish beyond multi-file import.
+- iOS static library packaging in the release workflow.
+- Larger project-folder persistence beyond imported file sets.
 - Full release-signing secrets in GitHub Actions.
+
+## Native FHE
+
+The app uses the same native path as the Flutter wallet direction:
+
+- `native/vendor/webcli/pvac`: vendored PVAC C API and serialization code.
+- `native/cpp/octra_core.cpp`: stable C ABI consumed by Dart FFI.
+- `lib/octra_core_bridge.dart`: Flutter FFI loader for Android/iOS/Linux.
+- `lib/main.dart`: runs PVAC operations in a background isolate.
+
+Supported native operations in the DevTools UI:
+
+- `register_pubkey`
+- `fhe_encrypt`
+- `fhe_decrypt`
+
+The host smoke test validates register, encrypt, decrypt, view-key derivation, and stealth output scan:
+
+```bash
+native/cpp/build_host.sh
+python3 native/cpp/smoke_test.py native/cpp/target/local/liboctra_core.so
+```
 
 ## Release Signing
 
@@ -97,6 +126,7 @@ flutter test
 
 - [Research summary](docs/research.md)
 - [Architecture plan](docs/architecture.md)
+- [Native FHE/PVAC integration](docs/native-fhe.md)
 - [Roadmap](docs/roadmap.md)
 - [Groth16 BN254 plan](docs/groth16-bn254.md)
 

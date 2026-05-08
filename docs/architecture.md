@@ -16,7 +16,8 @@ Responsibilities:
 
 Current status:
 
-- Initial shell exists in `lib/main.dart`.
+- MT Manager-style mobile workspace exists in `lib/main.dart`.
+- The layout uses a project manager, editor/compiler panels, deploy/call panels, inspectors, proof tools, FHE tools, and output logs.
 
 ## 2. Workspace Manager
 
@@ -121,9 +122,18 @@ Responsibilities:
 
 Implementation choices:
 
-- If existing PVAC native library can be reused cleanly, expose it through Flutter FFI.
-- If the operation is supported by Octra RPC and does not expose secrets, call RPC.
-- Heavy private operations should stay local and never require a server.
+- The current implementation uses the native C++ PVAC bridge copied from Octra Wallet.
+- `native/vendor/webcli/pvac` provides the PVAC C API and serialization layer.
+- `native/cpp/octra_core.cpp` exports the stable `octra_core_*` C ABI.
+- `lib/octra_core_bridge.dart` loads `liboctra_core.so` on Android and process symbols on iOS.
+- `lib/main.dart` sends `op: register_pubkey`, `op: fhe_encrypt`, and `op: fhe_decrypt`.
+- Heavy FHE calls run on a background isolate so proof/encryption work does not block Flutter rendering.
+
+Current status:
+
+- Host native build passes.
+- Host smoke test passes register, encrypt, decrypt, view-key derivation, and stealth output scanning.
+- GitHub Actions builds Android OpenSSL, builds Android `liboctra_core.so`, verifies runtime dependencies, then packages APKs.
 
 ## 8. Groth16 BN254 Proof Lab
 

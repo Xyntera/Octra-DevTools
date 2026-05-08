@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -62,7 +64,7 @@ class OctraDevToolsApp extends StatelessWidget {
           error: Color(0xffff7777),
         ),
         textTheme: ThemeData.dark().textTheme.apply(
-          fontFamily: 'Georgia',
+          fontFamily: 'monospace',
           bodyColor: const Color(0xffedf8e8),
           displayColor: const Color(0xffedf8e8),
         ),
@@ -76,6 +78,19 @@ class OctraDevToolsApp extends StatelessWidget {
       home: const DevToolsHome(),
     );
   }
+}
+
+Future<Map<String, dynamic>> _executePvacOffUi(Map<String, dynamic> payload) {
+  return Isolate.run(() async {
+    final bridge = createOctraCoreBridge();
+    if (!bridge.isAvailable) {
+      return {
+        'ok': false,
+        'error': bridge.unavailableReason ?? 'Native PVAC core unavailable',
+      };
+    }
+    return bridge.executePrivacyOperation(payload);
+  });
 }
 
 class DevToolsHome extends StatefulWidget {
@@ -625,6 +640,19 @@ class _DevToolsHomeState extends State<DevToolsHome> {
         return {'bundle': bundle.toJson(), 'verify_result': verifyResult};
       });
 
+  Future<void> _nativeHealth() => _run('native PVAC health', () async {
+    if (!_nativeCore.isAvailable) {
+      return {
+        'status': 'native_pvac_unavailable',
+        'reason': _nativeCore.unavailableReason,
+        'required_library': Platform.isAndroid
+            ? 'android/app/src/main/jniLibs/<abi>/liboctra_core.so'
+            : 'iOS static lib symbols linked into Runner',
+      };
+    }
+    return _nativeCore.health();
+  });
+
   Future<void> _fheNativeRequired(String mode) => _run('FHE $mode', () async {
     if (!_nativeCore.isAvailable) {
       return {
@@ -636,12 +664,34 @@ class _DevToolsHomeState extends State<DevToolsHome> {
       };
     }
     final wallet = _requireSigningWallet();
-    return _nativeCore.executePrivacyOperation({
-      'operation': mode,
-      'private_key_b64': wallet.privateKeyBase64,
-      'value': int.tryParse(_fheValue.text.trim()),
-      'ciphertext': _fheCipher.text.trim(),
-    });
+    final Map<String, dynamic> payload = switch (mode) {
+      'register_pubkey' => {
+        'op': 'register_pubkey',
+        'private_key_b64': wallet.privateKeyBase64,
+      },
+      'fhe_encrypt' => {
+        'op': 'fhe_encrypt',
+        'private_key_b64': wallet.privateKeyBase64,
+        'amount_raw': _requireUnsignedInt(_fheValue.text, 'integer value'),
+        'seed_b64': _randomB64(),
+      },
+      'fhe_decrypt' => {
+        'op': 'fhe_decrypt',
+        'private_key_b64': wallet.privateKeyBase64,
+        'cipher': _fheCipher.text.trim(),
+      },
+      _ => throw ArgumentError('unsupported FHE mode: $mode'),
+    };
+    final result = await _executePvacOffUi(payload);
+    final cipher = result['cipher']?.toString();
+    final amount = result['amount_raw']?.toString();
+    if (mounted) {
+      setState(() {
+        if (cipher != null && cipher.isNotEmpty) _fheCipher.text = cipher;
+        if (amount != null && amount.isNotEmpty) _fheValue.text = amount;
+      });
+    }
+    return result;
   });
 
   Future<void> _confirmSigning(String reason) async {
@@ -740,6 +790,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
                       final left = Column(
                         children: [
                           _connectionCard(),
+                          _workspaceCard(),
                           _compilerCard(),
                           _deployCard(),
                           _callCard(),
@@ -788,7 +839,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Native Octra IDE',
+                  'Native Octra IDE / MT-style workspace',
                   style: TextStyle(color: Color(0xffb8f28b)),
                 ),
                 const SizedBox(height: 6),
@@ -881,21 +932,20 @@ class _DevToolsHomeState extends State<DevToolsHome> {
       title: 'Compiler',
       subtitle: 'AML, multi-file AML, and OASM through Octra RPC',
       children: [
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              for (final file in _files)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(file.path),
-                    selected: file.path == _selectedPath,
-                    onSelected: (_) => _selectFile(file.path),
-                  ),
+        Row(
+          children: [
+            const Icon(Icons.description_outlined, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _selectedPath ?? 'No active file',
+                style: const TextStyle(
+                  color: Color(0xffb8f28b),
+                  fontWeight: FontWeight.w800,
                 ),
-            ],
-          ),
+              ),
+            ),
+          ],
         ),
         Wrap(
           spacing: 10,
@@ -925,7 +975,12 @@ class _DevToolsHomeState extends State<DevToolsHome> {
           ],
         ),
         _field(_amlSource, 'main.aml', lines: 12, mono: true),
-        _SyntaxPreview(source: _amlSource.text),
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          title: const Text('Syntax preview'),
+          subtitle: const Text('Collapsed by default to keep the editor fast'),
+          children: [_SyntaxPreview(source: _amlSource.text)],
+        ),
         Wrap(
           spacing: 10,
           runSpacing: 10,
@@ -1130,21 +1185,105 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     return _Card(
       title: 'FHE Tools',
       subtitle:
-          'Product surface ready; native PVAC FFI required for real crypto',
+          'Real native PVAC FFI: key registration, FHE encrypt, FHE decrypt',
       children: [
-        _field(_fheValue, 'Integer value'),
-        _field(_fheCipher, 'Ciphertext', lines: 3, mono: true),
+        _field(_fheValue, 'Raw integer amount'),
+        _field(_fheCipher, 'hfhe_v1 ciphertext', lines: 4, mono: true),
         Wrap(
           spacing: 10,
           runSpacing: 10,
           children: [
             OutlinedButton(
-              onPressed: _busy ? null : () => _fheNativeRequired('encrypt'),
+              onPressed: _busy ? null : _nativeHealth,
+              child: const Text('Native Health'),
+            ),
+            OutlinedButton(
+              onPressed: _busy
+                  ? null
+                  : () => _fheNativeRequired('register_pubkey'),
+              child: const Text('Register PVAC Key'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : () => _fheNativeRequired('fhe_encrypt'),
               child: const Text('Encrypt'),
             ),
             OutlinedButton(
-              onPressed: _busy ? null : () => _fheNativeRequired('decrypt'),
+              onPressed: _busy ? null : () => _fheNativeRequired('fhe_decrypt'),
               child: const Text('Decrypt'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _workspaceCard() {
+    return _Card(
+      title: 'Project Manager',
+      subtitle: 'File tree, templates, imports, and active source',
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: const Color(0xee050806),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0x223dffb5)),
+          ),
+          child: Column(
+            children: [
+              for (final file in _files)
+                ListTile(
+                  dense: true,
+                  leading: Icon(
+                    file.path.endsWith('.oasm')
+                        ? Icons.memory
+                        : Icons.article_outlined,
+                    color: file.path == _selectedPath
+                        ? const Color(0xffb8f28b)
+                        : const Color(0xffaebfac),
+                  ),
+                  title: Text(
+                    file.path,
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      color: file.path == _selectedPath
+                          ? const Color(0xffb8f28b)
+                          : const Color(0xffedf8e8),
+                      fontWeight: file.path == _selectedPath
+                          ? FontWeight.w800
+                          : FontWeight.w500,
+                    ),
+                  ),
+                  subtitle: Text('${file.source.length} bytes'),
+                  selected: file.path == _selectedPath,
+                  onTap: _busy ? null : () => _selectFile(file.path),
+                ),
+            ],
+          ),
+        ),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _importFiles,
+              icon: const Icon(Icons.folder_open),
+              label: const Text('Import'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : () => _newTemplate('blank'),
+              child: const Text('Blank'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : () => _newTemplate('token'),
+              child: const Text('Token'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : () => _newTemplate('vault'),
+              child: const Text('Vault'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : () => _newTemplate('escrow'),
+              child: const Text('Escrow'),
             ),
           ],
         ),
@@ -1316,6 +1455,7 @@ Widget _field(
     minLines: lines,
     maxLines: lines == 1 ? 1 : lines,
     keyboardType: lines == 1 ? TextInputType.text : TextInputType.multiline,
+    scrollPadding: const EdgeInsets.fromLTRB(20, 20, 20, 260),
     style: mono ? const TextStyle(fontFamily: 'monospace', fontSize: 13) : null,
     decoration: InputDecoration(labelText: label),
   );
@@ -1354,6 +1494,19 @@ String _octToRaw(String text) {
     throw const FormatException('invalid OCT amount');
   }
   return (value * _octScale).round().toString();
+}
+
+String _requireUnsignedInt(String text, String label) {
+  final value = BigInt.tryParse(text.trim());
+  if (value == null || value.isNegative) {
+    throw FormatException('invalid $label');
+  }
+  return value.toString();
+}
+
+String _randomB64([int length = 32]) {
+  final random = Random.secure();
+  return base64Encode(List<int>.generate(length, (_) => random.nextInt(256)));
 }
 
 String _pretty(Object? value) =>
@@ -1494,7 +1647,10 @@ class _SyntaxPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final spans = _highlightAml(source);
+    final preview = source.length > 12000
+        ? '${source.substring(0, 12000)}\n\n// Preview truncated for editor performance.'
+        : source;
+    final spans = _highlightAml(preview);
     return Container(
       width: double.infinity,
       constraints: const BoxConstraints(maxHeight: 180),

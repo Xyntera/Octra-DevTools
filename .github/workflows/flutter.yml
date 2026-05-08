@@ -1,4 +1,4 @@
-name: Flutter CI
+name: Flutter Native CI
 
 on:
   push:
@@ -10,7 +10,7 @@ on:
 jobs:
   validate:
     name: Analyze and test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,10 +30,72 @@ jobs:
       - name: Test
         run: flutter test
 
+  native-host:
+    name: Native host PVAC smoke test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential libssl-dev python3
+
+      - name: Build host native core
+        run: native/cpp/build_host.sh
+
+      - name: Smoke test FHE bridge
+        run: python3 native/cpp/smoke_test.py native/cpp/target/local/liboctra_core.so
+
+  android-native-libs:
+    name: Android native PVAC libraries
+    runs-on: ubuntu-24.04
+    env:
+      ANDROID_API: "24"
+      ANDROID_NDK_VERSION: "27.0.12077973"
+      OPENSSL_VERSION: "3.3.2"
+      ANDROID_HOST_TAG: linux-x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Android NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$ANDROID_NDK_VERSION"
+
+      - name: Build Android OpenSSL
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          native/cpp/build_android_openssl.sh
+
+      - name: Build Android native core
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          source native/cpp/target/openssl-android/env.sh
+          native/cpp/build_android.sh
+
+      - name: Verify Android native runtime libraries
+        run: |
+          for abi in arm64-v8a x86_64; do
+            test -f "android/app/src/main/jniLibs/$abi/liboctra_core.so"
+            test -f "android/app/src/main/jniLibs/$abi/libcrypto.so"
+            test -f "android/app/src/main/jniLibs/$abi/libc++_shared.so"
+            readelf -d "android/app/src/main/jniLibs/$abi/liboctra_core.so" | grep -E 'libcrypto\.so|libc\+\+_shared\.so'
+          done
+
+      - name: Upload Android native libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-native-libs
+          path: android/app/src/main/jniLibs
+
   android-debug-apk:
     name: Build Android debug APK
-    runs-on: ubuntu-latest
-    needs: validate
+    runs-on: ubuntu-24.04
+    needs:
+      - validate
+      - native-host
+      - android-native-libs
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,6 +114,12 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+
+      - name: Download Android native libraries
+        uses: actions/download-artifact@v4
+        with:
+          name: android-native-libs
+          path: android/app/src/main/jniLibs
 
       - name: Build APK
         run: flutter build apk --debug
@@ -64,8 +132,11 @@ jobs:
 
   android-release-apk:
     name: Build Android release APK
-    runs-on: ubuntu-latest
-    needs: validate
+    runs-on: ubuntu-24.04
+    needs:
+      - validate
+      - native-host
+      - android-native-libs
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -84,6 +155,12 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+
+      - name: Download Android native libraries
+        uses: actions/download-artifact@v4
+        with:
+          name: android-native-libs
+          path: android/app/src/main/jniLibs
 
       - name: Restore signing key
         env:
