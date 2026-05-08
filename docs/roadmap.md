@@ -21,10 +21,12 @@ Goal: replicate the core Octra client DevTools loop.
 - Done: multi-file AML compile through JSON project input.
 - Done: OASM compile.
 - Done: output inspector for compiler/RPC data.
-- Open: project templates: blank, OCS-01 token, vault, escrow, multisig, PrivateML example-inspired template.
-- Open: local project manager.
-- Open: file import and folder import.
-- Open: syntax highlighting.
+- Done: project templates: blank, token, vault, escrow.
+- Done: local project persistence.
+- Done: file import for AML/OASM/JSON/TXT files.
+- Done: syntax-highlighted AML preview.
+- Open: OCS-01 token, multisig, PrivateML example-inspired templates.
+- Open: folder-tree import/presentation.
 - Open: copy/export compiler output.
 
 ## Phase 2: Contract Interaction
@@ -41,8 +43,8 @@ Goal: compile, deploy, call, inspect.
 - Done: contract metadata through `vm_contract`.
 - Done: ABI fetch through `octra_contractAbi`.
 - Done: storage lookup through `octra_contractStorage`.
-- Open: ABI-aware call form.
-- Open: receipt viewer through `contract_receipt`.
+- Done: ABI-aware call form generator.
+- Done: receipt viewer through `contract_receipt`.
 
 ## Phase 3: Wallet-Signed Native Flow
 
@@ -54,8 +56,8 @@ Goal: no server, local signing only.
 - Done: watch-only address mode for read-only dev work.
 - Done: nonce lookup with staging fallback.
 - Done: submit signed transaction with `octra_submit`.
-- Open: secure key storage.
-- Open: biometric/PIN confirmation before deploy/call.
+- Done: secure key storage.
+- Done: biometric/PIN confirmation before deploy/call.
 - Open: full pending transaction tracker.
 
 ## Phase 4: Source Verification

@@ -2,9 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:local_auth/local_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'groth16_codec.dart';
+import 'octra_core_bridge.dart';
 import 'octra_crypto.dart';
 
 void main() {
@@ -82,6 +87,9 @@ class DevToolsHome extends StatefulWidget {
 
 class _DevToolsHomeState extends State<DevToolsHome> {
   final _rpc = OctraRpcClient();
+  final _secureStorage = const FlutterSecureStorage();
+  final _localAuth = LocalAuthentication();
+  final _nativeCore = createOctraCoreBridge();
   final _rpcUrl = TextEditingController(text: _defaultRpcUrl);
   final _walletInput = TextEditingController();
   final _amlSource = TextEditingController(text: _starterAml);
@@ -114,12 +122,26 @@ class _DevToolsHomeState extends State<DevToolsHome> {
   final _proofCaller = TextEditingController();
   final _fheValue = TextEditingController(text: '42');
   final _fheCipher = TextEditingController();
+  final _receiptHash = TextEditingController();
 
+  final List<DevProjectFile> _files = [
+    const DevProjectFile(path: 'main.aml', source: _starterAml),
+  ];
+  final List<AbiMethod> _abiMethods = [];
   DevWallet? _wallet;
+  String? _selectedPath = 'main.aml';
+  String? _selectedAbiMethod;
   String _output =
       'Ready. Import a wallet or use watch-only mode, then compile AML.';
   String _activeTask = 'Idle';
   bool _busy = false;
+  bool _requireBiometric = true;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadPersistedState());
+  }
 
   @override
   void dispose() {
@@ -149,10 +171,60 @@ class _DevToolsHomeState extends State<DevToolsHome> {
       _proofCaller,
       _fheValue,
       _fheCipher,
+      _receiptHash,
     ]) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _loadPersistedState() async {
+    final prefs = await SharedPreferences.getInstance();
+    _rpcUrl.text = prefs.getString('rpc_url') ?? _rpcUrl.text;
+    _requireBiometric = prefs.getBool('require_biometric') ?? true;
+    final projectJson = prefs.getString('project_files');
+    if (projectJson != null) {
+      try {
+        final decoded = jsonDecode(projectJson);
+        if (decoded is List) {
+          _files
+            ..clear()
+            ..addAll(
+              decoded.map((item) => DevProjectFile.fromJson(_map(item))),
+            );
+          _selectedPath = _files.isEmpty ? null : _files.first.path;
+          if (_files.isNotEmpty) _amlSource.text = _files.first.source;
+          _syncProjectJson();
+        }
+      } catch (_) {
+        // Corrupt project cache should not block app startup.
+      }
+    }
+    final walletJson = await _secureStorage.read(key: 'wallet');
+    if (walletJson != null) {
+      try {
+        final wallet = _walletFromJson(_map(jsonDecode(walletJson)));
+        if (mounted) {
+          setState(() {
+            _wallet = wallet;
+            _proofCaller.text = wallet.address;
+          });
+        }
+      } catch (_) {
+        await _secureStorage.delete(key: 'wallet');
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _persistProject() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('rpc_url', _rpcUrl.text.trim());
+    await prefs.setBool('require_biometric', _requireBiometric);
+    await prefs.setString(
+      'project_files',
+      jsonEncode(_files.map((file) => file.toJson()).toList()),
+    );
   }
 
   Future<void> _run(String label, Future<Object?> Function() task) async {
@@ -181,6 +253,10 @@ class _DevToolsHomeState extends State<DevToolsHome> {
   Future<void> _login() async {
     await _run('wallet import', () async {
       final wallet = await importWallet(_walletInput.text);
+      await _secureStorage.write(
+        key: 'wallet',
+        value: jsonEncode(_walletToJson(wallet)),
+      );
       setState(() {
         _wallet = wallet;
         if (_proofCaller.text.trim().isEmpty) {
@@ -196,7 +272,103 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     });
   }
 
+  Future<void> _clearWallet() async {
+    await _run('clear wallet', () async {
+      await _secureStorage.delete(key: 'wallet');
+      setState(() {
+        _wallet = null;
+        _walletInput.clear();
+      });
+      return {'ok': true, 'message': 'wallet removed from secure storage'};
+    });
+  }
+
+  Future<void> _importFiles() async {
+    await _run('import project files', () async {
+      final picked = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.custom,
+        allowedExtensions: ['aml', 'oasm', 'json', 'txt'],
+        withData: true,
+      );
+      if (picked == null || picked.files.isEmpty) {
+        return {'cancelled': true};
+      }
+      for (final file in picked.files) {
+        final bytes =
+            file.bytes ??
+            (file.path == null ? null : await File(file.path!).readAsBytes());
+        if (bytes == null) continue;
+        _upsertFile(file.name, utf8.decode(bytes));
+      }
+      _syncProjectJson();
+      await _persistProject();
+      return {'imported': picked.files.map((file) => file.name).toList()};
+    });
+  }
+
+  Future<void> _newTemplate(String template) async {
+    await _run('new template', () async {
+      final source = switch (template) {
+        'token' => _tokenTemplate,
+        'vault' => _vaultTemplate,
+        'escrow' => _escrowTemplate,
+        _ => _starterAml,
+      };
+      _files
+        ..clear()
+        ..add(DevProjectFile(path: 'main.aml', source: source));
+      _selectedPath = 'main.aml';
+      _amlSource.text = source;
+      _syncProjectJson();
+      await _persistProject();
+      return {'template': template, 'file': 'main.aml'};
+    });
+  }
+
+  void _selectFile(String path) {
+    _saveActiveFile();
+    final file = _files.firstWhere((file) => file.path == path);
+    setState(() {
+      _selectedPath = path;
+      if (path.endsWith('.oasm')) {
+        _assemblySource.text = file.source;
+      } else {
+        _amlSource.text = file.source;
+      }
+    });
+  }
+
+  void _saveActiveFile() {
+    final path = _selectedPath;
+    if (path == null) return;
+    final source = path.endsWith('.oasm')
+        ? _assemblySource.text
+        : _amlSource.text;
+    _upsertFile(path, source);
+    _syncProjectJson();
+    unawaited(_persistProject());
+  }
+
+  void _upsertFile(String path, String source) {
+    final normalized = path.trim().isEmpty ? 'main.aml' : path.trim();
+    final index = _files.indexWhere((file) => file.path == normalized);
+    final file = DevProjectFile(path: normalized, source: source);
+    if (index >= 0) {
+      _files[index] = file;
+    } else {
+      _files.add(file);
+    }
+  }
+
+  void _syncProjectJson() {
+    _projectFiles.text = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(_files.map((file) => file.toJson()).toList());
+  }
+
   Future<void> _compileAml() => _run('compile AML', () async {
+    _saveActiveFile();
     final result = await _rpc.call(
       url: _rpcUrl.text,
       method: 'octra_compileAml',
@@ -207,8 +379,12 @@ class _DevToolsHomeState extends State<DevToolsHome> {
   });
 
   Future<void> _compileProject() => _run('compile project', () async {
-    final files = jsonDecode(_projectFiles.text);
-    if (files is! List) throw const FormatException('files must be an array');
+    _saveActiveFile();
+    final files = _files
+        .where((file) => file.path.endsWith('.aml'))
+        .map((file) => file.toJson())
+        .toList();
+    if (files.isEmpty) throw const FormatException('project has no AML files');
     final result = await _rpc.call(
       url: _rpcUrl.text,
       method: 'octra_compileAmlMulti',
@@ -219,6 +395,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
   });
 
   Future<void> _compileAssembly() => _run('compile assembly', () async {
+    _saveActiveFile();
     final result = await _rpc.call(
       url: _rpcUrl.text,
       method: 'octra_compileAssembly',
@@ -256,6 +433,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
 
   Future<void> _deploy() => _run('deploy program', () async {
     final wallet = _requireSigningWallet();
+    await _confirmSigning('Deploy program');
     final bytecode = _bytecode.text.trim();
     if (bytecode.isEmpty) throw const FormatException('bytecode required');
     final params = _deployParams.text.trim();
@@ -318,6 +496,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
 
   Future<void> _sendCall() => _run('send contract call tx', () async {
     final wallet = _requireSigningWallet();
+    await _confirmSigning('Send contract call');
     final params = _parseJsonArray(_callParams.text);
     final nonce = await _nextNonce(wallet.address);
     final tx = {
@@ -363,6 +542,56 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     };
   });
 
+  Future<void> _loadAbiMethods() => _run('load ABI methods', () async {
+    final address = _callAddress.text.trim().isNotEmpty
+        ? _callAddress.text.trim()
+        : _infoAddress.text.trim();
+    final abi = address.isEmpty
+        ? _map(jsonDecode(_output))
+        : await _rpc.call(
+            url: _rpcUrl.text,
+            method: 'octra_contractAbi',
+            params: [address],
+          );
+    final methods = extractAbiMethods(abi);
+    setState(() {
+      _abiMethods
+        ..clear()
+        ..addAll(methods);
+      if (methods.isNotEmpty) {
+        _selectedAbiMethod = methods.first.name;
+        _applyAbiMethod(methods.first);
+      }
+    });
+    return {'methods': methods.map((method) => method.toJson()).toList()};
+  });
+
+  void _applyAbiMethod(AbiMethod method) {
+    _callMethod.text = method.name;
+    _callParams.text = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(method.inputs.map((input) => input.exampleValue).toList());
+  }
+
+  Future<void> _receiptLookup() => _run('receipt lookup', () async {
+    final hash = _receiptHash.text.trim();
+    if (hash.isEmpty) throw const FormatException('transaction hash required');
+    return {
+      'contract_receipt': await _rpc.call(
+        url: _rpcUrl.text,
+        method: 'contract_receipt',
+        params: [hash],
+        timeout: const Duration(seconds: 20),
+      ),
+      'transaction': await _rpc.call(
+        url: _rpcUrl.text,
+        method: 'octra_transaction',
+        params: [hash],
+        timeout: const Duration(seconds: 20),
+      ),
+    };
+  });
+
   Future<void> _verifySource() => _run('verify source', () async {
     return _rpc.call(
       url: _rpcUrl.text,
@@ -397,14 +626,40 @@ class _DevToolsHomeState extends State<DevToolsHome> {
       });
 
   Future<void> _fheNativeRequired(String mode) => _run('FHE $mode', () async {
-    return {
-      'status': 'native_pvac_required',
-      'reason':
-          'FHE $mode must use the PVAC native library through Flutter FFI. This screen is wired as the product surface, but it intentionally does not fake ciphertext generation.',
-      'input_value': _fheValue.text,
-      'ciphertext': _fheCipher.text,
-    };
+    if (!_nativeCore.isAvailable) {
+      return {
+        'status': 'native_pvac_unavailable',
+        'reason': _nativeCore.unavailableReason,
+        'required_library': Platform.isAndroid
+            ? 'android/app/src/main/jniLibs/<abi>/liboctra_core.so'
+            : 'iOS static lib symbols linked into Runner',
+      };
+    }
+    final wallet = _requireSigningWallet();
+    return _nativeCore.executePrivacyOperation({
+      'operation': mode,
+      'private_key_b64': wallet.privateKeyBase64,
+      'value': int.tryParse(_fheValue.text.trim()),
+      'ciphertext': _fheCipher.text.trim(),
+    });
   });
+
+  Future<void> _confirmSigning(String reason) async {
+    if (!_requireBiometric) return;
+    final supported = await _localAuth.isDeviceSupported();
+    final canCheck = await _localAuth.canCheckBiometrics;
+    if (!supported && !canCheck) {
+      throw StateError(
+        'biometric confirmation is enabled but unavailable on this device',
+      );
+    }
+    final ok = await _localAuth.authenticate(
+      localizedReason: reason,
+      biometricOnly: false,
+      persistAcrossBackgrounding: true,
+    );
+    if (!ok) throw StateError('transaction confirmation cancelled');
+  }
 
   Future<int> _nextNonce(String address) async {
     final balance = _map(
@@ -437,6 +692,15 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     final map = _map(result);
     final bc = map['bytecode']?.toString();
     if (bc != null && bc.isNotEmpty) _bytecode.text = bc;
+    final methods = extractAbiMethods(map['abi']);
+    if (methods.isNotEmpty) {
+      setState(() {
+        _abiMethods
+          ..clear()
+          ..addAll(methods);
+        _selectedAbiMethod = methods.first.name;
+      });
+    }
   }
 
   DevWallet _requireWallet() {
@@ -484,6 +748,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
                       final right = Column(
                         children: [
                           _inspectorCard(),
+                          _receiptCard(),
                           _verifyCard(),
                           _proofCard(),
                           _fheCard(),
@@ -585,7 +850,23 @@ class _DevToolsHomeState extends State<DevToolsHome> {
               icon: const Icon(Icons.speed),
               label: const Text('Fetch Fee'),
             ),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _clearWallet,
+              icon: const Icon(Icons.logout),
+              label: const Text('Clear Wallet'),
+            ),
           ],
+        ),
+        SwitchListTile.adaptive(
+          value: _requireBiometric,
+          onChanged: _busy
+              ? null
+              : (value) {
+                  setState(() => _requireBiometric = value);
+                  unawaited(_persistProject());
+                },
+          title: const Text('Biometric/PIN confirmation'),
+          subtitle: const Text('Required before deploy and signed calls'),
         ),
         _field(
           _feeOp,
@@ -600,7 +881,51 @@ class _DevToolsHomeState extends State<DevToolsHome> {
       title: 'Compiler',
       subtitle: 'AML, multi-file AML, and OASM through Octra RPC',
       children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (final file in _files)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(file.path),
+                    selected: file.path == _selectedPath,
+                    onSelected: (_) => _selectFile(file.path),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _importFiles,
+              icon: const Icon(Icons.folder_open),
+              label: const Text('Import Files'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : () => _newTemplate('blank'),
+              child: const Text('Blank'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : () => _newTemplate('token'),
+              child: const Text('Token'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : () => _newTemplate('vault'),
+              child: const Text('Vault'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : () => _newTemplate('escrow'),
+              child: const Text('Escrow'),
+            ),
+          ],
+        ),
         _field(_amlSource, 'main.aml', lines: 12, mono: true),
+        _SyntaxPreview(source: _amlSource.text),
         Wrap(
           spacing: 10,
           runSpacing: 10,
@@ -671,6 +996,27 @@ class _DevToolsHomeState extends State<DevToolsHome> {
         _field(_callAddress, 'Program address'),
         _field(_callMethod, 'Method name'),
         _field(_callParams, 'Params JSON array'),
+        if (_abiMethods.isNotEmpty)
+          DropdownButtonFormField<String>(
+            initialValue: _selectedAbiMethod,
+            decoration: const InputDecoration(labelText: 'ABI method'),
+            items: [
+              for (final method in _abiMethods)
+                DropdownMenuItem(
+                  value: method.name,
+                  child: Text(method.signature),
+                ),
+            ],
+            onChanged: (value) {
+              final method = _abiMethods.firstWhere(
+                (method) => method.name == value,
+              );
+              setState(() {
+                _selectedAbiMethod = value;
+                _applyAbiMethod(method);
+              });
+            },
+          ),
         Row(
           children: [
             Expanded(child: _field(_callAmount, 'Attached OCT')),
@@ -682,6 +1028,10 @@ class _DevToolsHomeState extends State<DevToolsHome> {
           spacing: 10,
           runSpacing: 10,
           children: [
+            OutlinedButton(
+              onPressed: _busy ? null : _loadAbiMethods,
+              child: const Text('Load ABI Form'),
+            ),
             OutlinedButton(
               onPressed: _busy ? null : () => _recommendedFee('call'),
               child: const Text('Recommended Fee'),
@@ -710,6 +1060,24 @@ class _DevToolsHomeState extends State<DevToolsHome> {
         FilledButton(
           onPressed: _busy ? null : _contractInfo,
           child: const Text('Lookup Contract'),
+        ),
+        OutlinedButton(
+          onPressed: _busy ? null : _loadAbiMethods,
+          child: const Text('Load ABI Methods'),
+        ),
+      ],
+    );
+  }
+
+  Widget _receiptCard() {
+    return _Card(
+      title: 'Receipt Viewer',
+      subtitle: 'Fetch contract receipt and raw transaction by hash',
+      children: [
+        _field(_receiptHash, 'Transaction hash'),
+        FilledButton(
+          onPressed: _busy ? null : _receiptLookup,
+          child: const Text('Lookup Receipt'),
         ),
       ],
     );
@@ -990,3 +1358,273 @@ String _octToRaw(String text) {
 
 String _pretty(Object? value) =>
     const JsonEncoder.withIndent('  ').convert(value);
+
+class DevProjectFile {
+  const DevProjectFile({required this.path, required this.source});
+
+  final String path;
+  final String source;
+
+  factory DevProjectFile.fromJson(Map<String, dynamic> json) {
+    return DevProjectFile(
+      path: json['path']?.toString() ?? 'main.aml',
+      source: json['source']?.toString() ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'path': path, 'source': source};
+}
+
+class AbiMethod {
+  const AbiMethod({
+    required this.name,
+    required this.inputs,
+    this.view = false,
+  });
+
+  final String name;
+  final List<AbiInput> inputs;
+  final bool view;
+
+  String get signature =>
+      '$name(${inputs.map((input) => '${input.name}: ${input.type}').join(', ')})';
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'view': view,
+    'inputs': inputs.map((input) => input.toJson()).toList(),
+  };
+}
+
+class AbiInput {
+  const AbiInput({required this.name, required this.type});
+
+  final String name;
+  final String type;
+
+  Object get exampleValue {
+    final normalized = type.toLowerCase();
+    if (normalized.contains('int') || normalized.contains('u64')) return 0;
+    if (normalized.contains('bool')) return false;
+    if (normalized.contains('list') || normalized.contains('array')) return [];
+    if (normalized.contains('map') || normalized.contains('object')) return {};
+    if (normalized.contains('address')) return 'oct...';
+    return '';
+  }
+
+  Map<String, dynamic> toJson() => {'name': name, 'type': type};
+}
+
+List<AbiMethod> extractAbiMethods(Object? abi) {
+  final methods = <AbiMethod>[];
+  void visit(Object? value) {
+    if (value is List) {
+      for (final item in value) {
+        visit(item);
+      }
+      return;
+    }
+    if (value is! Map) return;
+    final map = Map<String, dynamic>.from(value);
+    final nested = map['methods'] ?? map['functions'] ?? map['views'];
+    if (nested != null) visit(nested);
+    final name = map['name'] ?? map['method'] ?? map['function'];
+    if (name == null) return;
+    final type = (map['type'] ?? map['kind'] ?? '').toString().toLowerCase();
+    if (type.isNotEmpty &&
+        !['function', 'method', 'view', 'call'].contains(type)) {
+      return;
+    }
+    final rawInputs = map['inputs'] ?? map['params'] ?? map['args'] ?? [];
+    final inputs = <AbiInput>[];
+    if (rawInputs is List) {
+      for (var i = 0; i < rawInputs.length; i++) {
+        final raw = rawInputs[i];
+        if (raw is Map) {
+          inputs.add(
+            AbiInput(
+              name: raw['name']?.toString() ?? 'arg$i',
+              type: raw['type']?.toString() ?? 'string',
+            ),
+          );
+        } else {
+          inputs.add(AbiInput(name: 'arg$i', type: raw.toString()));
+        }
+      }
+    }
+    methods.add(
+      AbiMethod(
+        name: name.toString(),
+        inputs: inputs,
+        view: type == 'view' || map['view'] == true,
+      ),
+    );
+  }
+
+  visit(abi);
+  final seen = <String>{};
+  return [
+    for (final method in methods)
+      if (seen.add(method.signature)) method,
+  ];
+}
+
+Map<String, dynamic> _walletToJson(DevWallet wallet) => {
+  'address': wallet.address,
+  'publicKeyBase64': wallet.publicKeyBase64,
+  'privateKeyBase64': wallet.privateKeyBase64,
+  'mnemonic': wallet.mnemonic,
+  'watchOnly': wallet.watchOnly,
+};
+
+DevWallet _walletFromJson(Map<String, dynamic> json) {
+  return DevWallet(
+    address: json['address']?.toString() ?? '',
+    publicKeyBase64: json['publicKeyBase64']?.toString() ?? '',
+    privateKeyBase64: json['privateKeyBase64']?.toString(),
+    mnemonic: json['mnemonic']?.toString(),
+    watchOnly: json['watchOnly'] == true,
+  );
+}
+
+class _SyntaxPreview extends StatelessWidget {
+  const _SyntaxPreview({required this.source});
+
+  final String source;
+
+  @override
+  Widget build(BuildContext context) {
+    final spans = _highlightAml(source);
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxHeight: 180),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xdd050806),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0x223dffb5)),
+      ),
+      child: SingleChildScrollView(
+        child: RichText(
+          text: TextSpan(
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 12,
+              height: 1.35,
+              color: Color(0xffd9f6d3),
+            ),
+            children: spans,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+List<TextSpan> _highlightAml(String source) {
+  final keywords = RegExp(
+    r'\b(program|contract|state|constructor|fn|view|let|if|else|while|for|in|return|assert|require|struct|enum|event|import|interface|true|false|self|caller|origin|emit)\b',
+  );
+  final types = RegExp(
+    r'\b(string|int|bool|address|bytes|cipher|pubkey|map|list|void)\b',
+  );
+  final strings = RegExp(r'"(?:[^"\\]|\\.)*"');
+  final numbers = RegExp(r'\b\d+\b');
+  final pattern = RegExp(
+    '${strings.pattern}|${keywords.pattern}|${types.pattern}|${numbers.pattern}',
+  );
+  final spans = <TextSpan>[];
+  var index = 0;
+  for (final match in pattern.allMatches(source)) {
+    if (match.start > index) {
+      spans.add(TextSpan(text: source.substring(index, match.start)));
+    }
+    final text = source.substring(match.start, match.end);
+    Color color;
+    if (strings.hasMatch(text)) {
+      color = const Color(0xffffd479);
+    } else if (keywords.hasMatch(text)) {
+      color = const Color(0xff66e0ff);
+    } else if (types.hasMatch(text)) {
+      color = const Color(0xffb8f28b);
+    } else {
+      color = const Color(0xffff9f7a);
+    }
+    spans.add(
+      TextSpan(
+        text: text,
+        style: TextStyle(color: color),
+      ),
+    );
+    index = match.end;
+  }
+  if (index < source.length) {
+    spans.add(TextSpan(text: source.substring(index)));
+  }
+  return spans;
+}
+
+const _tokenTemplate = '''program MobileToken {
+  state {
+    name: string
+    symbol: string
+    total_supply: int
+    balances: map<address, int>
+  }
+
+  constructor(n: string, s: string, supply: int) {
+    self.name = n
+    self.symbol = s
+    self.total_supply = supply
+    self.balances[caller] = supply
+  }
+
+  view fn balance_of(owner: address): int {
+    return self.balances[owner]
+  }
+}
+''';
+
+const _vaultTemplate = '''program Vault {
+  state {
+    owner: address
+    deposits: map<address, int>
+  }
+
+  constructor() {
+    self.owner = caller
+  }
+
+  fn deposit(amount: int): bool {
+    self.deposits[caller] = self.deposits[caller] + amount
+    return true
+  }
+
+  view fn balance_of(owner: address): int {
+    return self.deposits[owner]
+  }
+}
+''';
+
+const _escrowTemplate = '''program Escrow {
+  state {
+    seller: address
+    buyer: address
+    arbiter: address
+    released: bool
+  }
+
+  constructor(s: address, b: address, a: address) {
+    self.seller = s
+    self.buyer = b
+    self.arbiter = a
+    self.released = false
+  }
+
+  fn release(): bool {
+    require(caller == self.buyer || caller == self.arbiter)
+    self.released = true
+    return true
+  }
+}
+''';

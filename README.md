@@ -42,27 +42,44 @@ Core layers:
 Implemented:
 
 - Wallet login/import.
+- Secure wallet persistence using platform secure storage.
+- Biometric/PIN confirmation before signed deploy/call actions.
 - Watch-only mode.
+- File import for AML/OASM/JSON/TXT project files.
+- Mobile project file tabs and local project persistence.
+- Built-in templates: blank, token, vault, escrow.
 - AML compile.
 - Multi-file AML compile.
 - OASM compile.
+- Syntax-highlighted AML preview.
 - Recommended fees.
 - Deploy address preview.
 - Signed deploy transaction build and submit.
 - Read-only contract call.
 - Signed contract-call transaction build and submit.
+- ABI method extraction and generated params form.
 - Contract info, ABI, and storage lookup.
+- Receipt lookup through contract receipt and raw transaction RPC calls.
 - Source verification.
 - Groth16 BN254 snarkjs JSON encoding and verifier call.
+- Native PVAC FFI bridge surface for FHE encrypt/decrypt.
 
 Still requires native/product hardening:
 
-- Secure persistent key storage.
-- Biometric confirmation.
-- Native PVAC FHE encrypt/decrypt through Flutter FFI.
-- File/folder picker project manager.
-- ABI-driven forms and syntax highlighting.
-- Release signing configuration.
+- Bundling real `liboctra_core` binaries for Android/iOS PVAC operations.
+- Folder-tree project manager polish beyond multi-file import.
+- Full release-signing secrets in GitHub Actions.
+
+## Release Signing
+
+The workflow builds debug and release APK artifacts. To produce a real signed production release, add these GitHub repository secrets:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+
+Without those secrets, the release build falls back to debug signing so CI can still validate the build.
 
 ## Run
 
