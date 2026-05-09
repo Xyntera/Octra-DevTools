@@ -18,7 +18,7 @@ void main() {
   runApp(const OctraDevToolsApp());
 }
 
-const _defaultRpcUrl = 'https://octra.network/rpc';
+const _defaultRpcUrl = 'http://46.101.86.250:8080/rpc';
 const _octScale = 1000000;
 
 const _starterAml = '''contract MyContract {
@@ -1458,7 +1458,11 @@ class OctraRpcClient {
     required List<Object?> params,
     Duration timeout = const Duration(seconds: 15),
   }) async {
-    final request = await _client.postUrl(Uri.parse(url.trim()));
+    final rawUri = Uri.parse(url.trim());
+    final uri = (rawUri.path.isEmpty || rawUri.path == '/')
+        ? rawUri.replace(path: '/rpc')
+        : rawUri;
+    final request = await _client.postUrl(uri);
     request.headers.contentType = ContentType.json;
     request.write(
       jsonEncode({
