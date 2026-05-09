@@ -117,14 +117,21 @@ address preview was also tested with `octra_computeContractAddress`.
 
 ## Release Signing
 
-The workflow builds debug and release APK artifacts. To produce a real signed production release, add these GitHub repository secrets:
+The workflow builds debug and release APK artifacts. `app-release.apk` now requires production signing. Add these GitHub repository secrets before running the release build:
 
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_PASSWORD`
 - `ANDROID_KEY_ALIAS`
 
-Without those secrets, the release build falls back to debug signing so CI can still validate the build.
+Without those secrets, the release APK job fails. This prevents shipping a debug-signed file as a production release.
+
+Generate a keystore locally:
+
+```bash
+keytool -genkeypair -v -keystore octra-devtools-release.jks -keyalg RSA -keysize 4096 -validity 10000 -alias octra-devtools
+base64 -w0 octra-devtools-release.jks
+```
 
 ## Run
 

@@ -39,11 +39,11 @@ class OctraDevToolsApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xff07100d),
+        scaffoldBackgroundColor: const Color(0xff050706),
         colorScheme: const ColorScheme.dark(
-          primary: Color(0xffb8f28b),
-          secondary: Color(0xff66e0ff),
-          surface: Color(0xff101b16),
+          primary: Color(0xffd7ff8f),
+          secondary: Color(0xff7bdcff),
+          surface: Color(0xff111611),
           error: Color(0xffff7777),
         ),
         textTheme: ThemeData.dark().textTheme.apply(
@@ -51,10 +51,25 @@ class OctraDevToolsApp extends StatelessWidget {
           bodyColor: const Color(0xffedf8e8),
           displayColor: const Color(0xffedf8e8),
         ),
+        navigationBarTheme: NavigationBarThemeData(
+          backgroundColor: const Color(0xee101410),
+          indicatorColor: const Color(0x334cff9d),
+          labelTextStyle: WidgetStateProperty.resolveWith(
+            (states) => TextStyle(
+              fontSize: 11,
+              fontWeight: states.contains(WidgetState.selected)
+                  ? FontWeight.w800
+                  : FontWeight.w500,
+              color: states.contains(WidgetState.selected)
+                  ? const Color(0xffd7ff8f)
+                  : const Color(0xffaebfac),
+            ),
+          ),
+        ),
         inputDecorationTheme: const InputDecorationTheme(
           border: OutlineInputBorder(),
           filled: true,
-          fillColor: Color(0xaa08110d),
+          fillColor: Color(0xcc080b08),
         ),
         useMaterial3: true,
       ),
@@ -82,6 +97,8 @@ class DevToolsHome extends StatefulWidget {
   @override
   State<DevToolsHome> createState() => _DevToolsHomeState();
 }
+
+enum _DevScreen { wallet, editor, deploy, inspect, crypto }
 
 class _DevToolsHomeState extends State<DevToolsHome> {
   final _rpc = OctraRpcClient();
@@ -132,6 +149,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
   String _output =
       'Ready. Import a wallet or use watch-only mode, then compile AML.';
   String _activeTask = 'Idle';
+  _DevScreen _activeScreen = _DevScreen.editor;
   bool _busy = false;
   bool _requireBiometric = true;
 
@@ -754,61 +772,167 @@ class _DevToolsHomeState extends State<DevToolsHome> {
 
   @override
   Widget build(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= 820;
     return Scaffold(
+      resizeToAvoidBottomInset: true,
+      bottomNavigationBar: wide ? null : _bottomNav(),
       body: Stack(
         children: [
           const _Atmosphere(),
           SafeArea(
-            child: CustomScrollView(
-              slivers: [
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 10),
-                  sliver: SliverToBoxAdapter(child: _header(context)),
-                ),
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
-                  sliver: SliverLayoutBuilder(
-                    builder: (context, constraints) {
-                      final wide = constraints.crossAxisExtent >= 1100;
-                      final left = Column(
-                        children: [
-                          _connectionCard(),
-                          _workspaceCard(),
-                          _compilerCard(),
-                          _deployCard(),
-                          _callCard(),
-                        ],
-                      );
-                      final right = Column(
-                        children: [
-                          _inspectorCard(),
-                          _receiptCard(),
-                          _verifyCard(),
-                          _proofCard(),
-                          _fheCard(),
-                          _outputCard(),
-                        ],
-                      );
-                      if (!wide) {
-                        return SliverList.list(children: [left, right]);
-                      }
-                      return SliverToBoxAdapter(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(child: left),
-                            const SizedBox(width: 18),
-                            Expanded(child: right),
-                          ],
-                        ),
-                      );
-                    },
+            child: Row(
+              children: [
+                if (wide) _rail(),
+                Expanded(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    child: _screenScaffold(context, _activeScreen),
                   ),
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _screenScaffold(BuildContext context, _DevScreen screen) {
+    return CustomScrollView(
+      key: ValueKey(screen),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+          sliver: SliverToBoxAdapter(child: _header(context)),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+          sliver: SliverList.list(children: _screenCards(screen)),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _screenCards(_DevScreen screen) {
+    return switch (screen) {
+      _DevScreen.wallet => [_connectionCard(), _outputCard(compact: true)],
+      _DevScreen.editor => [
+        _workspaceCard(),
+        _compilerCard(),
+        _outputCard(compact: true),
+      ],
+      _DevScreen.deploy => [
+        _deployCard(),
+        _callCard(),
+        _outputCard(compact: true),
+      ],
+      _DevScreen.inspect => [
+        _inspectorCard(),
+        _receiptCard(),
+        _verifyCard(),
+        _outputCard(compact: true),
+      ],
+      _DevScreen.crypto => [
+        _fheCard(),
+        _proofCard(),
+        _outputCard(compact: true),
+      ],
+    };
+  }
+
+  int get _activeIndex => _DevScreen.values.indexOf(_activeScreen);
+
+  void _setActiveIndex(int index) {
+    setState(() => _activeScreen = _DevScreen.values[index]);
+  }
+
+  Widget _bottomNav() {
+    return NavigationBar(
+      selectedIndex: _activeIndex,
+      onDestinationSelected: _setActiveIndex,
+      destinations: const [
+        NavigationDestination(
+          icon: Icon(Icons.account_balance_wallet_outlined),
+          selectedIcon: Icon(Icons.account_balance_wallet),
+          label: 'Wallet',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.data_object_outlined),
+          selectedIcon: Icon(Icons.data_object),
+          label: 'Editor',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.rocket_launch_outlined),
+          selectedIcon: Icon(Icons.rocket_launch),
+          label: 'Deploy',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.manage_search_outlined),
+          selectedIcon: Icon(Icons.manage_search),
+          label: 'Inspect',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.enhanced_encryption_outlined),
+          selectedIcon: Icon(Icons.enhanced_encryption),
+          label: 'Crypto',
+        ),
+      ],
+    );
+  }
+
+  Widget _rail() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 0, 12),
+      child: _Glass(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+        child: NavigationRail(
+          backgroundColor: Colors.transparent,
+          selectedIndex: _activeIndex,
+          onDestinationSelected: _setActiveIndex,
+          labelType: NavigationRailLabelType.all,
+          minWidth: 84,
+          selectedIconTheme: const IconThemeData(color: Color(0xffd7ff8f)),
+          unselectedIconTheme: const IconThemeData(color: Color(0xffaebfac)),
+          selectedLabelTextStyle: const TextStyle(
+            color: Color(0xffd7ff8f),
+            fontWeight: FontWeight.w900,
+            fontSize: 12,
+          ),
+          unselectedLabelTextStyle: const TextStyle(
+            color: Color(0xffaebfac),
+            fontSize: 12,
+          ),
+          destinations: const [
+            NavigationRailDestination(
+              icon: Icon(Icons.account_balance_wallet_outlined),
+              selectedIcon: Icon(Icons.account_balance_wallet),
+              label: Text('Wallet'),
+            ),
+            NavigationRailDestination(
+              icon: Icon(Icons.data_object_outlined),
+              selectedIcon: Icon(Icons.data_object),
+              label: Text('Editor'),
+            ),
+            NavigationRailDestination(
+              icon: Icon(Icons.rocket_launch_outlined),
+              selectedIcon: Icon(Icons.rocket_launch),
+              label: Text('Deploy'),
+            ),
+            NavigationRailDestination(
+              icon: Icon(Icons.manage_search_outlined),
+              selectedIcon: Icon(Icons.manage_search),
+              label: Text('Inspect'),
+            ),
+            NavigationRailDestination(
+              icon: Icon(Icons.enhanced_encryption_outlined),
+              selectedIcon: Icon(Icons.enhanced_encryption),
+              label: Text('Crypto'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -836,7 +960,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
                 const SizedBox(height: 8),
                 Text(
                   _wallet == null
-                      ? 'Compile, inspect, deploy, call, verify, and test proofs from a native Flutter client.'
+                      ? 'Webcli-style contract IDE split for mobile: wallet, editor, deploy, inspect, crypto.'
                       : 'Wallet: ${_wallet!.address} (${_wallet!.watchOnly ? 'watch-only' : 'signing'})',
                 ),
               ],
@@ -1290,13 +1414,16 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     );
   }
 
-  Widget _outputCard() {
+  Widget _outputCard({bool compact = false}) {
     return _Card(
       title: 'Output',
       subtitle: _activeTask,
       children: [
         Container(
-          constraints: const BoxConstraints(minHeight: 260, maxHeight: 560),
+          constraints: BoxConstraints(
+            minHeight: compact ? 180 : 260,
+            maxHeight: compact ? 320 : 560,
+          ),
           width: double.infinity,
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -1401,22 +1528,23 @@ class _Card extends StatelessWidget {
 }
 
 class _Glass extends StatelessWidget {
-  const _Glass({required this.child});
+  const _Glass({required this.child, this.padding = const EdgeInsets.all(18)});
   final Widget child;
+  final EdgeInsetsGeometry padding;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: padding,
       decoration: BoxDecoration(
-        color: const Color(0xcc101b16),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: const Color(0x263dffb5)),
+        color: const Color(0xd4111611),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: const Color(0x2fd7ff8f)),
         boxShadow: const [
           BoxShadow(
             color: Color(0x66000000),
-            blurRadius: 30,
-            offset: Offset(0, 18),
+            blurRadius: 36,
+            offset: Offset(0, 20),
           ),
         ],
       ),
@@ -1433,9 +1561,9 @@ class _Atmosphere extends StatelessWidget {
     return const DecoratedBox(
       decoration: BoxDecoration(
         gradient: RadialGradient(
-          center: Alignment(-0.75, -0.85),
+          center: Alignment(-0.72, -0.92),
           radius: 1.35,
-          colors: [Color(0x553dffb5), Color(0xff07100d), Color(0xff020403)],
+          colors: [Color(0x334cff9d), Color(0xff050706), Color(0xff010201)],
         ),
       ),
       child: SizedBox.expand(),

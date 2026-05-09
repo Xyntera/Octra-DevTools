@@ -51,11 +51,13 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (!keystorePropertiesFile.exists()) {
+                throw GradleException(
+                    "Release signing is not configured. Create android/key.properties " +
+                        "or configure ANDROID_KEYSTORE_* GitHub secrets."
+                )
             }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
