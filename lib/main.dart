@@ -18,7 +18,7 @@ void main() {
   runApp(const OctraDevToolsApp());
 }
 
-const _defaultRpcUrl = 'http://46.101.86.250:8080/rpc';
+const _defaultRpcUrl = '';
 const _octScale = 1000000;
 
 const _starterAml = '''contract MyContract {
@@ -384,7 +384,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
   Future<void> _compileAml() => _run('compile AML', () async {
     _saveActiveFile();
     final result = await _rpc.call(
-      url: _rpcUrl.text,
+      url: _requireRpcUrl(),
       method: 'octra_compileAml',
       params: [_amlSource.text],
     );
@@ -400,7 +400,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
         .toList();
     if (files.isEmpty) throw const FormatException('project has no AML files');
     final result = await _rpc.call(
-      url: _rpcUrl.text,
+      url: _requireRpcUrl(),
       method: 'octra_compileAmlMulti',
       params: [
         {'files': files, 'main': 'main.aml'},
@@ -413,7 +413,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
   Future<void> _compileAssembly() => _run('compile assembly', () async {
     _saveActiveFile();
     final result = await _rpc.call(
-      url: _rpcUrl.text,
+      url: _requireRpcUrl(),
       method: 'octra_compileAssembly',
       params: [_assemblySource.text],
     );
@@ -425,7 +425,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
       _run('recommended fee', () async {
         final opType = op ?? _feeOp.text.trim();
         final result = await _rpc.call(
-          url: _rpcUrl.text,
+          url: _requireRpcUrl(),
           method: 'octra_recommendedFee',
           params: opType.isEmpty ? [] : [opType],
         );
@@ -441,7 +441,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     if (bytecode.isEmpty) throw const FormatException('bytecode required');
     final nonce = await _nextNonce(wallet.address);
     return _rpc.call(
-      url: _rpcUrl.text,
+      url: _requireRpcUrl(),
       method: 'octra_computeContractAddress',
       params: [bytecode, wallet.address, nonce],
     );
@@ -456,7 +456,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     if (params.isNotEmpty) jsonDecode(params);
     final nonce = await _nextNonce(wallet.address);
     final addressResult = await _rpc.call(
-      url: _rpcUrl.text,
+      url: _requireRpcUrl(),
       method: 'octra_computeContractAddress',
       params: [bytecode, wallet.address, nonce],
     );
@@ -479,7 +479,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     };
     final signed = await signTransaction(wallet, tx);
     final submit = await _rpc.call(
-      url: _rpcUrl.text,
+      url: _requireRpcUrl(),
       method: 'octra_submit',
       params: [signed],
       timeout: const Duration(seconds: 30),
@@ -498,7 +498,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     final params = _parseJsonArray(_callParams.text);
     final caller = _wallet?.address;
     return _rpc.call(
-      url: _rpcUrl.text,
+      url: _requireRpcUrl(),
       method: 'contract_call',
       params: [
         _callAddress.text.trim(),
@@ -528,7 +528,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     };
     final signed = await signTransaction(wallet, tx);
     final submit = await _rpc.call(
-      url: _rpcUrl.text,
+      url: _requireRpcUrl(),
       method: 'octra_submit',
       params: [signed],
       timeout: const Duration(seconds: 30),
@@ -540,18 +540,18 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     final address = _infoAddress.text.trim();
     return {
       'contract': await _rpc.call(
-        url: _rpcUrl.text,
+        url: _requireRpcUrl(),
         method: 'vm_contract',
         params: [address],
       ),
       'abi': await _rpc.call(
-        url: _rpcUrl.text,
+        url: _requireRpcUrl(),
         method: 'octra_contractAbi',
         params: [address],
       ),
       if (_storageKey.text.trim().isNotEmpty)
         'storage.${_storageKey.text.trim()}': await _rpc.call(
-          url: _rpcUrl.text,
+          url: _requireRpcUrl(),
           method: 'octra_contractStorage',
           params: [address, _storageKey.text.trim()],
         ),
@@ -565,7 +565,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     final abi = address.isEmpty
         ? _map(jsonDecode(_output))
         : await _rpc.call(
-            url: _rpcUrl.text,
+            url: _requireRpcUrl(),
             method: 'octra_contractAbi',
             params: [address],
           );
@@ -594,13 +594,13 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     if (hash.isEmpty) throw const FormatException('transaction hash required');
     return {
       'contract_receipt': await _rpc.call(
-        url: _rpcUrl.text,
+        url: _requireRpcUrl(),
         method: 'contract_receipt',
         params: [hash],
         timeout: const Duration(seconds: 20),
       ),
       'transaction': await _rpc.call(
-        url: _rpcUrl.text,
+        url: _requireRpcUrl(),
         method: 'octra_transaction',
         params: [hash],
         timeout: const Duration(seconds: 20),
@@ -610,7 +610,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
 
   Future<void> _verifySource() => _run('verify source', () async {
     return _rpc.call(
-      url: _rpcUrl.text,
+      url: _requireRpcUrl(),
       method: 'contract_verify',
       params: [_verifyAddress.text.trim(), _amlSource.text],
       timeout: const Duration(seconds: 30),
@@ -628,7 +628,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
             ? _proofCaller.text.trim()
             : (_wallet?.address ?? _proofContract.text.trim());
         final verifyResult = await _rpc.call(
-          url: _rpcUrl.text,
+          url: _requireRpcUrl(),
           method: 'contract_call',
           params: [
             _proofContract.text.trim(),
@@ -715,7 +715,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
   Future<int> _nextNonce(String address) async {
     final balance = _map(
       await _rpc.call(
-        url: _rpcUrl.text,
+        url: _requireRpcUrl(),
         method: 'octra_balance',
         params: [address],
       ),
@@ -723,7 +723,7 @@ class _DevToolsHomeState extends State<DevToolsHome> {
     var nonce = int.tryParse(balance['nonce']?.toString() ?? '') ?? 0;
     try {
       final staging = _map(
-        await _rpc.call(url: _rpcUrl.text, method: 'staging_view', params: []),
+        await _rpc.call(url: _requireRpcUrl(), method: 'staging_view', params: []),
       );
       final staged = staging['staged_transactions'] ?? staging['transactions'];
       if (staged is List) {
@@ -752,6 +752,12 @@ class _DevToolsHomeState extends State<DevToolsHome> {
         _selectedAbiMethod = methods.first.name;
       });
     }
+  }
+
+  String _requireRpcUrl() {
+    final url = _rpcUrl.text.trim();
+    if (url.isEmpty) throw StateError('RPC endpoint required — enter a node URL in the Wallet and RPC card');
+    return url;
   }
 
   DevWallet _requireWallet() {
