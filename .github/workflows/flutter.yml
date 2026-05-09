@@ -179,7 +179,7 @@ jobs:
             echo "storePassword=${ANDROID_KEYSTORE_PASSWORD}"
             echo "keyPassword=${ANDROID_KEY_PASSWORD}"
             echo "keyAlias=${ANDROID_KEY_ALIAS}"
-            echo "storeFile=app/release-keystore.jks"
+            echo "storeFile=release-keystore.jks"
           } > android/key.properties
 
       - name: Build release APK
